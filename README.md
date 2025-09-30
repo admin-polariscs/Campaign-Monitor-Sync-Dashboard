@@ -1,9 +1,11 @@
-PPPP   L     AAAAA  N   N EEEEE TTTTT     PPPP   OOOOO  L     AAAAA  RRRR   III SSSSS
-P   P  L     A   A  NN  N E       T       P   P  O   O  L     A   A  R   R   I  S
-PPPP   L     AAAAA  N N N EEEE    T       PPPP   O   O  L     AAAAA  RRRR    I  SSS
-P      L     A   A  N  NN E       T       P      O   O  L     A   A  R  R    I     S
-P      LLLLL A   A  N   N EEEEE   T       P      OOOOO  LLLLL A   A  R   R  III SSSSS
-
+  _____  _                  _     _____      _            _     
+ |  __ \| |                | |   |  __ \    | |          (_)    
+ | |__) | | __ _ _ __   ___| |_  | |__) |__ | | __ _ _ __ _ ___ 
+ |  ___/| |/ _` | '_ \ / _ \ __| |  ___/ _ \| |/ _` | '__| / __|
+ | |    | | (_| | | | |  __/ |_  | |  | (_) | | (_| | |  | \__ \
+ |_|    |_|\__,_|_| |_|\___|\__| |_|   \___/|_|\__,_|_|  |_|___/
+                                                                
+                                                                
                               GPL 3.0 LICENSE
 
 
