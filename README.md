@@ -12,7 +12,7 @@
 
 Campaign Monitor Sync Dashboard with Flask + Pandas
 
-Managing multiple subscriber lists across consortia is a nightmare when done manually. Each month, subscriber spreadsheets had to be uploaded one by one into Campaign Monitor, unsubscribes handled separately, and invalid addresses manually identified.
+Managing multiple subscriber lists across multiple databases is a nightmare when done manually. Each month, subscriber spreadsheets had to be uploaded one by one into Campaign Monitor, unsubscribes handled separately, and invalid addresses manually identified.
 
 To solve this, I built a Flask-based dashboard that connects local Excel databases directly to Campaign Monitor via the API, with the following features:
 
@@ -90,7 +90,7 @@ Choose a database (or “sync all”), optionally tick the unsubscribe option, a
 After sync, download invalid addresses with one click (invalid_emails.xlsx with a sheet per database).
 
 📊 Example output (browser log)
-Batch sync started: Visa Kiwi.xlsx
+Batch sync started: nameofdb.xlsx
 Columns found: ['Name', 'Surname', 'E-mail', ...]
 Total subscribers to sync: 3491
 Batch 1: new=0, existing=997, duplicates=2, invalid=1
@@ -102,10 +102,10 @@ Total duplicates: 3
 Total invalid: 8
 --- Unsubscribe check ---
 [DEBUG] Active subscribers in CM: 3476
-[DEBUG] Example: ['tin@allwaysdive.com.au', 'anthony@voyageslapara.com']
+[DEBUG] Example: ['jondo@allwaysdfive.com.au', 'johndoe@voyagfeslapara.com']
 Unsubscribed: 0
 
 💡 Why it matters
 
-Before: manual updates across 30+ consortia databases, high risk of errors, wasted hours.
+Before: manual updates across 30+  databases, high risk of errors, wasted hours.
 Now: automated, auditable, and exportable sync in minutes.
