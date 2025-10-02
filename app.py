@@ -39,32 +39,33 @@ databases = [
     }
 ]
 
-# === Globals ===
+# === GLOBALS ===
 progress_log = []
-invalids_per_db = {}
+invalids_per_db = {}   # { db_name: [ {"Email":..., "Reason":...}, ... ] }
 
 def log(msg):
     print(msg)
     progress_log.append(msg)
 
-# === HTML Template ===
+# === HTML TEMPLATE ===
 html_template = """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="UTF-8">
-  <title>Campaign Monitor Sync</title>
+  <title>Mailing Sofitel Legend The Grand Sync</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 700px; margin: 40px auto; }
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; }
+    h2 { margin-bottom: 10px; }
     #output { background: #f7f7f7; padding: 10px; border: 1px solid #ccc;
               white-space: pre-line; height: 400px; overflow-y: auto; }
     button { margin: 6px; padding: 8px 14px; }
   </style>
 </head>
 <body>
-  <h2>Campaign Monitor Sync Dashboard</h2>
+  <h2>Mailing Sofitel Legend The Grand Sync</h2>
 
-  <label for="dbSelect">Choose database:</label>
+  <label for="dbSelect">Kies database:</label>
   <select id="dbSelect">
     {% for db in databases %}
     <option value="{{ loop.index0 }}">{{ db.name }}</option>
@@ -74,22 +75,22 @@ html_template = """
   <br><br>
   <label>
     <input type="checkbox" id="doUnsub">
-    Also unsubscribe missing addresses
+    Ook unsubscriben wat niet in Excel staat
   </label>
   <br>
 
-  <button onclick="syncSelected()">Sync selected</button>
-  <button onclick="syncAll()">Sync all</button>
-  <a href="/download_invalids"><button>Download invalids</button></a>
+  <button onclick="syncSelected()">Sync geselecteerde</button>
+  <button onclick="syncAll()">Sync alle</button>
+  <a href="/download_invalids"><button>Download ongeldige adressen</button></a>
 
-  <h3>Results (live)</h3>
+  <h3>Resultaten (live)</h3>
   <div id="output"></div>
 
   <script>
     let evtSource;
     function startStream() {
       const output = document.getElementById("output");
-      output.innerText = ""; 
+      output.innerText = "";
       if (evtSource) evtSource.close();
       evtSource = new EventSource("/stream");
       evtSource.onmessage = function(e) {
@@ -115,22 +116,18 @@ html_template = """
 </html>
 """
 
-# === Helpers ===
+# === HELPERS ===
 def clean(value):
     if pd.isna(value):
         return ""
     s = str(value).strip()
-    if s.lower() == "nan":
-        return ""
-    return s
+    return "" if s.lower() == "nan" else s
 
 def detect_email_column(df):
-    """Detects the email column automatically"""
     possible_cols = [c for c in df.columns if "mail" in c.lower()]
     return possible_cols[0] if possible_cols else None
 
 def get_active_subscribers(list_id):
-    """Fetch all active subscribers from Campaign Monitor"""
     emails = set()
     page = 1
     while True:
@@ -140,7 +137,25 @@ def get_active_subscribers(list_id):
         results = data.get("Results", [])
         for sub in results:
             emails.add(sub["EmailAddress"].lower().strip())
-        if page >= data.get("NumberOfPages", 1):
+        total_pages = data.get("NumberOfPages", 1)
+        if page >= total_pages:
+            break
+        page += 1
+    return emails
+
+def get_unsubscribed_subscribers(list_id):
+    """Fetch unsubscribed emails from Campaign Monitor"""
+    emails = set()
+    page = 1
+    while True:
+        url = f"https://api.createsend.com/api/v3.2/lists/{list_id}/unsubscribed.json?pagesize=1000&page={page}"
+        r = requests.get(url, auth=AUTH)
+        data = r.json()
+        results = data.get("Results", [])
+        for sub in results:
+            emails.add(sub["EmailAddress"].lower().strip())
+        total_pages = data.get("NumberOfPages", 1)
+        if page >= total_pages:
             break
         page += 1
     return emails
@@ -149,49 +164,73 @@ def unsubscribe_missing(list_id, drive_emails):
     cm_emails = get_active_subscribers(list_id)
     drive_set = set(e.lower().strip() for e in drive_emails if e)
     to_unsub = cm_emails - drive_set
-    log(f"Unsubscribing {len(to_unsub)} addresses")
+    log(f"Aantal in Campaign Monitor (active): {len(cm_emails)}")
+    log(f"Aantal in Excel: {len(drive_set)}")
+    log(f"Te unsubscriben: {len(to_unsub)} adressen")
     for email in to_unsub:
         payload = {"EmailAddress": email}
         url = f"{API_BASE}{list_id}/unsubscribe.json"
-        requests.post(url, auth=AUTH, json=payload)
-        log(f"⛔ Unsubscribed: {email}")
+        r = requests.post(url, auth=AUTH, json=payload)
+        if r.status_code in (200, 201):
+            log(f"⛔ Unsubscribed: {email}")
+        else:
+            log(f"⚠️ Unsub error {email}: {r.status_code} {r.text}")
 
-def sync_file(filepath, list_id, do_unsub=False):
+def export_invalids_to_excel():
+    if not invalids_per_db:
+        log("⚠️ Geen ongeldige adressen om te exporteren.")
+        return None
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"invalid_emails_{timestamp}.xlsx"
+    with pd.ExcelWriter(filename, engine="xlsxwriter") as writer:
+        for db_name, rows in invalids_per_db.items():
+            if rows:
+                df = pd.DataFrame(rows)
+                safe_name = db_name[:30]
+                df.to_excel(writer, sheet_name=safe_name, index=False)
+    log(f"✅ Ongeldige adressen geëxporteerd naar {filename}")
+    return filename
+
+def sync_file(filepath, list_id, db_name, do_unsub=False):
     if not os.path.exists(filepath):
-        log(f"⚠️ File not found: {filepath}")
+        log(f"⚠️ Bestand niet gevonden: {filepath}")
         return
 
     try:
         df = pd.read_excel(filepath)
     except Exception as e:
-        log(f"⚠️ Could not read file {filepath}, error: {e}")
+        log(f"⚠️ Kon bestand niet lezen: {filepath}, fout: {e}")
         return
 
-    log(f"Batch sync started: {os.path.basename(filepath)}")
-    log(f"Columns found: {list(df.columns)}")
+    log(f"Batch sync gestart: {os.path.basename(filepath)}")
+    log(f"Kolommen gevonden: {list(df.columns)}")
 
     email_col = detect_email_column(df)
     if not email_col:
-        log("⚠️ No email column found (look for 'Email', 'E-mail', 'Mail'...)")
+        log("⚠️ Geen kolom met e-mail gevonden")
         return
 
+    # 🚫 Get unsubscribed list and skip them
+    unsubscribed = get_unsubscribed_subscribers(list_id)
+    log(f"[DEBUG] {len(unsubscribed)} unsubscribed addresses will be skipped")
+
     subscribers = []
-    drive_emails = []
     for _, row in df.iterrows():
         email = clean(row.get(email_col, ""))
         if not email:
             continue
-        drive_emails.append(email)
+        if email.lower() in unsubscribed:
+            log(f"⏩ Skipping unsubscribed {email}")
+            continue
+
         firstname = clean(row.get("Name", ""))
         lastname = clean(row.get("Surname", ""))
-
         custom_fields = []
         for col in df.columns:
             if col not in [email_col, "Name", "Surname"]:
                 value = clean(row.get(col, ""))
                 if value:
                     custom_fields.append({"Key": col, "Value": value})
-
         subscribers.append({
             "EmailAddress": email,
             "Name": f"{firstname} {lastname}".strip(),
@@ -200,54 +239,66 @@ def sync_file(filepath, list_id, do_unsub=False):
             "CustomFields": custom_fields
         })
 
-    url = f"{API_BASE}{list_id}/import.json"
-    total_new = total_existing = total_duplicates = total_failures = 0
-    invalids_per_db[list_id] = []
+    if not subscribers:
+        log("⚠️ Geen geldige subscribers gevonden in dit bestand.")
+        return
 
+    url = f"{API_BASE}{list_id}/import.json"
     chunk_size = 1000
-    for i in range(0, len(subscribers), chunk_size):
+    total = len(subscribers)
+    log(f"Totaal subscribers te syncen: {total}")
+
+    total_new = total_existing = total_duplicates = total_failures = 0
+    drive_emails = [s["EmailAddress"] for s in subscribers]
+    invalids_per_db[db_name] = []
+
+    for i in range(0, total, chunk_size):
         batch = subscribers[i:i + chunk_size]
         payload = {"Subscribers": batch, "Resubscribe": False}
         r = requests.post(url, auth=AUTH, json=payload)
-        data = r.json()
-        rd = data.get("ResultData", {})
-        new = rd.get("TotalNewSubscribers", 0)
-        existing = rd.get("TotalExistingSubscribers", 0)
-        dups = len(rd.get("DuplicateEmailsInSubmission", []))
-        fails = len(rd.get("FailureDetails", []))
-        invalids = rd.get("FailureDetails", [])
+        batch_nr = i // chunk_size + 1
+        try:
+            data = r.json()
+        except:
+            data = {}
 
-        total_new += new
-        total_existing += existing
-        total_duplicates += dups
-        total_failures += fails
+        if r.status_code in (200, 201) or r.status_code == 400:
+            rd = data.get("ResultData", {})
+            new = rd.get("TotalNewSubscribers", 0)
+            existing = rd.get("TotalExistingSubscribers", 0)
+            dups = len(rd.get("DuplicateEmailsInSubmission", []))
+            fails = len(rd.get("FailureDetails", []))
+            total_new += new
+            total_existing += existing
+            total_duplicates += dups
+            total_failures += fails
 
-        for f in invalids:
-            invalids_per_db[list_id].append(f)
+            for f in rd.get("FailureDetails", []):
+                invalids_per_db[db_name].append({
+                    "Email": f.get("EmailAddress"),
+                    "Reason": f.get("Message")
+                })
 
-        log(f"Batch: new={new}, existing={existing}, duplicates={dups}, invalid={fails}")
+            log(f"Batch {batch_nr}: nieuwe={new}, bestaande={existing}, duplicaten={dups}, ongeldig={fails}")
+        else:
+            log(f"Batch {batch_nr}: fout {r.status_code} {r.text}")
+        time.sleep(0.2)
 
-    log("=== Final report ===")
-    log(f"New: {total_new}, Existing: {total_existing}, Duplicates: {total_duplicates}, Invalid: {total_failures}")
+    log("=== Eindrapport ===")
+    log(f"Totaal nieuwe: {total_new}")
+    log(f"Totaal bestaande: {total_existing}")
+    log(f"Totaal duplicaten: {total_duplicates}")
+    log(f"Totaal ongeldig: {total_failures}")
 
     if do_unsub:
+        log("--- Unsubscribe check ---")
         unsubscribe_missing(list_id, drive_emails)
+    else:
+        log("--- Unsubscribe overslaan (niet aangevinkt) ---")
 
-def export_invalids_to_excel():
-    if not invalids_per_db:
-        log("⚠️ No invalid addresses to export.")
-        return None
+    export_invalids_to_excel()
 
-    filename = "invalid_emails.xlsx"
-    with pd.ExcelWriter(filename, engine="xlsxwriter") as writer:
-        for db_name, rows in invalids_per_db.items():
-            if rows:
-                df = pd.DataFrame(rows)
-                df.to_excel(writer, sheet_name=str(db_name)[:30], index=False)
-    log(f"✅ Invalid addresses exported to {filename}")
-    return filename
-
-# === Routes ===
+# === ROUTES ===
 @app.route("/")
 def index():
     return render_template_string(html_template, databases=databases)
@@ -270,7 +321,7 @@ def sync_selected(idx):
     progress_log = []
     db = databases[idx]
     do_unsub = request.args.get("unsub") == "1"
-    sync_file(db["file"], db["listId"], do_unsub)
+    sync_file(db["file"], db["listId"], db["name"], do_unsub)
     return "OK"
 
 @app.route("/sync_all")
@@ -280,15 +331,15 @@ def sync_all():
     do_unsub = request.args.get("unsub") == "1"
     for db in databases:
         log(f"--- {db['name']} ---")
-        sync_file(db["file"], db["listId"], do_unsub)
+        sync_file(db["file"], db["listId"], db["name"], do_unsub)
     return "OK"
 
 @app.route("/download_invalids")
 def download_invalids():
     filename = export_invalids_to_excel()
-    if not filename or not os.path.exists(filename):
-        return "⚠️ No export file found. Run a sync first."
-    return send_file(filename, as_attachment=True)
+    if filename and os.path.exists(filename):
+        return send_file(filename, as_attachment=True)
+    return "⚠️ Geen exportbestand gevonden. Run eerst een sync."
 
 if __name__ == "__main__":
     app.run(debug=True, threaded=True)
