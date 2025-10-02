@@ -195,7 +195,7 @@ def sync_file(filepath, list_id, do_unsub=False):
         subscribers.append({
             "EmailAddress": email,
             "Name": f"{firstname} {lastname}".strip(),
-            "Resubscribe": True,
+            "Resubscribe": False,
             "ConsentToTrack": "Yes",
             "CustomFields": custom_fields
         })
@@ -207,7 +207,7 @@ def sync_file(filepath, list_id, do_unsub=False):
     chunk_size = 1000
     for i in range(0, len(subscribers), chunk_size):
         batch = subscribers[i:i + chunk_size]
-        payload = {"Subscribers": batch, "Resubscribe": True}
+        payload = {"Subscribers": batch, "Resubscribe": False}
         r = requests.post(url, auth=AUTH, json=payload)
         data = r.json()
         rd = data.get("ResultData", {})
